@@ -26,3 +26,4 @@ go.work
 # FNRadio
 media
 .env
+server

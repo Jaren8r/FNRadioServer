@@ -495,6 +495,8 @@ func main() {
 		Debug: *debugPtr,
 	}
 
+	server.cleanupBrokenStations()
+
 	server.cleanupLiveStations()
 
 	server.setupRouter()

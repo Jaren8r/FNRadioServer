@@ -123,6 +123,19 @@ func (server *FNRadioServer) createLiveBlurl(station *Station, c *gin.Context) (
 	})
 }
 
+func (server *FNRadioServer) cleanupBrokenStations() {
+	dir, err := os.ReadDir("media")
+	if err != nil {
+		return
+	}
+
+	for _, file := range dir {
+		if _, err := os.Stat("media/" + file.Name() + "/master.m3u8"); os.IsNotExist(err) {
+			_ = os.RemoveAll("media/" + file.Name())
+		}
+	}
+}
+
 func (server *FNRadioServer) cleanupLiveStations() {
 	for _, station := range server.LiveStations.Stations {
 		station.Quit <- struct{}{}
