@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"strconv"
@@ -36,6 +35,10 @@ func getDuration(output string) (int, error) {
 }
 
 func (server *FNRadioServer) createBlurl(station *Station, c *gin.Context) ([]byte, error) {
+	if c.Request.Header.Get("X-API-Root") == "" {
+		return nil, errors.New("invalid api root")
+	}
+
 	if strings.EqualFold(station.Type, StationTypeStatic) {
 		return server.createStaticBlurl(station, c)
 	}
@@ -44,7 +47,7 @@ func (server *FNRadioServer) createBlurl(station *Station, c *gin.Context) ([]by
 		return server.createLiveBlurl(station, c)
 	}
 
-	return nil, fmt.Errorf("unknown station type")
+	return nil, errors.New("unknown station type")
 }
 
 func (server *FNRadioServer) createStaticBlurl(station *Station, c *gin.Context) ([]byte, error) {
@@ -61,10 +64,6 @@ func (server *FNRadioServer) createStaticBlurl(station *Station, c *gin.Context)
 	duration, err := getDuration(string(output))
 	if err != nil {
 		return nil, err
-	}
-
-	if c.Request.Header.Get("X-API-Root") == "" {
-		return nil, errors.New("invalid root")
 	}
 
 	mediaRoot := c.Request.Header.Get("X-API-Root") + "/media/" + url.PathEscape(station.Source.String)
