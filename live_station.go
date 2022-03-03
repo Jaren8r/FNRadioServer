@@ -121,8 +121,6 @@ func (station *LiveStation) RunTicker(ffmpeg *exec.Cmd, stdin io.WriteCloser) {
 			}
 
 			if !hasMore && time.Until(station.LastRequest.Add(time.Second*8)) < 0 {
-				fmt.Println("Killing station")
-
 				station.Quit <- struct{}{}
 
 				break
