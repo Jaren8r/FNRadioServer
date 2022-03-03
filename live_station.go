@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -104,6 +105,41 @@ const TickLengthInSeconds = 2
 const BytesPerSecond = 44100 /* sample rate */ * 2 /* 16-bit */ * 2 /* channels (stereo) */
 const BytesPerTick = BytesPerSecond * TickLengthInSeconds
 
+func (station *LiveStation) RunTicker(ffmpeg *exec.Cmd, stdin io.WriteCloser) {
+	ticker := time.NewTicker(TickLengthInSeconds * time.Second)
+	station.Quit = make(chan struct{}, 1)
+
+	for {
+		select {
+		case <-ticker.C:
+			frame, hasMore := station.Queue.GetAudioFrame()
+
+			_, err := stdin.Write(frame)
+			if err != nil {
+				station.Quit <- struct{}{}
+				break
+			}
+
+			if !hasMore && time.Until(station.LastRequest.Add(time.Second*8)) < 0 {
+				fmt.Println("Killing station")
+
+				station.Quit <- struct{}{}
+
+				break
+			}
+		case <-station.Quit:
+			ticker.Stop()
+
+			_ = ffmpeg.Process.Kill()
+			_ = os.RemoveAll("media/" + station.Folder)
+
+			station.store.Remove(station)
+
+			return
+		}
+	}
+}
+
 func (station *LiveStation) Start() {
 	err := os.Mkdir("media/"+station.Folder, 0777)
 	if err != nil {
@@ -119,40 +155,7 @@ func (station *LiveStation) Start() {
 		return
 	}
 
-	go func() {
-		ticker := time.NewTicker(TickLengthInSeconds * time.Second)
-		station.Quit = make(chan struct{}, 1)
-
-		for {
-			select {
-			case <-ticker.C:
-				frame, hasMore := station.Queue.GetAudioFrame()
-
-				_, err := stdin.Write(frame)
-				if err != nil {
-					station.Quit <- struct{}{}
-					break
-				}
-
-				if !hasMore && time.Until(station.LastRequest.Add(time.Second*8)) < 0 {
-					fmt.Println("Killing station")
-
-					station.Quit <- struct{}{}
-
-					break
-				}
-			case <-station.Quit:
-				ticker.Stop()
-
-				_ = ffmpeg.Process.Kill()
-				_ = os.RemoveAll("media/" + station.Folder)
-
-				station.store.Remove(station)
-
-				return
-			}
-		}
-	}()
+	go station.RunTicker(ffmpeg, stdin)
 
 	err = ffmpeg.Start()
 	if err != nil {
