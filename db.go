@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 type User struct {
@@ -30,7 +30,7 @@ type Station struct {
 func (server *FNRadioServer) setupDB() {
 	var err error
 
-	server.DB, err = pgx.Connect(context.Background(), os.Getenv("DATABASE_URL"))
+	server.DB, err = pgxpool.Connect(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
 		panic(err)
 	}

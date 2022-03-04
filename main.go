@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v4/pgxpool"
 
-	"github.com/jackc/pgx/v4"
+	"github.com/joho/godotenv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,8 +22,9 @@ import (
 type FNRadioServer struct {
 	Debug          bool
 	Router         *gin.Engine
-	DB             *pgx.Conn
+	DB             *pgxpool.Pool
 	StreamStations StreamStationStore
+	Parties        PartyStore
 }
 
 func (server *FNRadioServer) getStation(c *gin.Context) {
@@ -115,50 +116,87 @@ func (server *FNRadioServer) createUser(c *gin.Context) {
 	})
 }
 
+func (server *FNRadioServer) getCurrentUser(c *gin.Context) {
+	currentUser := c.MustGet("user").(User)
+
+	stations, err := server.getUserStations(currentUser.ID)
+
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
+
+		return
+	}
+
+	bindings, err := server.getUserBindings(currentUser.ID)
+
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
+
+		return
+	}
+
+	stationsMap := make(map[string]Station)
+	bindingsMap := make(map[string]Binding)
+
+	for _, station := range stations {
+		stationsMap[station.ID] = station
+	}
+
+	for _, binding := range bindings {
+		bindingsMap[binding.ID] = binding
+	}
+
+	c.JSON(200, gin.H{
+		"stations": stationsMap,
+		"bindings": bindingsMap,
+	})
+}
+
+func (server *FNRadioServer) getPartyLeader(c *gin.Context, userToGet string) {
+	bindings, err := server.getUserBindings(userToGet)
+
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
+
+		return
+	}
+
+	bindingsMap := make(map[string]Binding)
+
+	for _, binding := range bindings {
+		bindingsMap[binding.ID] = binding
+	}
+
+	c.JSON(200, gin.H{
+		"bindings": bindingsMap,
+	})
+}
+
 func (server *FNRadioServer) getUser(c *gin.Context) {
 	currentUser := c.MustGet("user").(User)
 
 	userToGet := c.Param("user")
 
-	if userToGet == "@me" {
-		stations, err := server.getUserStations(currentUser.ID)
-
-		if err != nil {
-			c.JSON(500, gin.H{
-				"error": err.Error(),
-			})
-
-			return
-		}
-
-		bindings, err := server.getUserBindings(currentUser.ID)
-
-		if err != nil {
-			c.JSON(500, gin.H{
-				"error": err.Error(),
-			})
-
-			return
-		}
-
-		stationsMap := make(map[string]Station)
-		bindingsMap := make(map[string]Binding)
-
-		for _, station := range stations {
-			stationsMap[station.ID] = station
-		}
-
-		for _, binding := range bindings {
-			bindingsMap[binding.ID] = binding
-		}
-
-		c.JSON(200, gin.H{
-			"stations": stationsMap,
-			"bindings": bindingsMap,
-		})
-
+	if userToGet == "@me" || userToGet == currentUser.ID {
+		server.getCurrentUser(c)
 		return
 	}
+
+	party := server.Parties.GetUserParty(currentUser.ID)
+	if party != nil && party.Members[0] == userToGet {
+		server.getPartyLeader(c, userToGet)
+		return
+	}
+
+	c.JSON(403, gin.H{
+		"error": "you do not have permission to get this user",
+	})
 }
 
 type createStationPayload struct {
@@ -439,6 +477,46 @@ func (server *FNRadioServer) handleMedia(c *gin.Context) {
 	}
 }
 
+func (server *FNRadioServer) setParty(c *gin.Context) {
+	var clientParty ClientParty
+
+	err := c.BindJSON(&clientParty)
+	if err != nil {
+		c.JSON(400, gin.H{
+			"error": err.Error(),
+		})
+	}
+
+	user := c.MustGet("user").(User)
+
+	server.Parties.RemoveUser(user.ID)
+
+	if clientParty.Match != "" {
+		if !clientParty.Validate() {
+			c.JSON(400, gin.H{
+				"error": err.Error(),
+			})
+
+			return
+		}
+
+		party, err := server.Parties.CreateOrJoinParty(user.ID, clientParty)
+		if err != nil {
+			c.JSON(400, gin.H{
+				"error": err.Error(),
+			})
+
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"leader": party.Members[0],
+		})
+	}
+
+	c.Status(204)
+}
+
 func (server *FNRadioServer) setupRouter() {
 	if server.Debug {
 		gin.SetMode(gin.DebugMode)
@@ -478,6 +556,8 @@ func (server *FNRadioServer) setupRouter() {
 	server.Router.PUT("/users/@me/bindings/:binding", server.handleAuth, server.createBinding)
 
 	server.Router.DELETE("/users/@me/bindings/:binding", server.handleAuth, server.deleteBinding)
+
+	server.Router.POST("/users/@me/party", server.handleAuth, server.setParty)
 }
 
 func (server *FNRadioServer) Destroy() {
