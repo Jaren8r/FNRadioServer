@@ -12,7 +12,7 @@ import (
 
 const (
 	StationTypeStatic = "static"
-	StationTypeLive   = "live"
+	StationTypeStream = "stream"
 )
 
 func getDuration(output string) (int, error) {
@@ -43,8 +43,8 @@ func (server *FNRadioServer) createBlurl(station *Station, c *gin.Context) ([]by
 		return server.createStaticBlurl(station, c)
 	}
 
-	if strings.EqualFold(station.Type, StationTypeLive) {
-		return server.createLiveBlurl(station, c)
+	if strings.EqualFold(station.Type, StationTypeStream) {
+		return server.createStreamBlurl(station, c)
 	}
 
 	return nil, errors.New("unknown station type")
@@ -95,15 +95,15 @@ func (server *FNRadioServer) createStaticBlurl(station *Station, c *gin.Context)
 	})
 }
 
-func (server *FNRadioServer) createLiveBlurl(station *Station, c *gin.Context) ([]byte, error) {
-	liveStation := server.LiveStations.GetOrCreate(station)
+func (server *FNRadioServer) createStreamBlurl(station *Station, c *gin.Context) ([]byte, error) {
+	streamStation := server.StreamStations.GetOrCreate(station)
 
-	master, err := os.ReadFile("media/" + liveStation.Folder + "/master.m3u8")
+	master, err := os.ReadFile("media/" + streamStation.Folder + "/master.m3u8")
 	if err != nil {
 		return nil, err
 	}
 
-	mediaRoot := c.Request.Header.Get("X-API-Root") + "/media/" + url.PathEscape(liveStation.Folder)
+	mediaRoot := c.Request.Header.Get("X-API-Root") + "/media/" + url.PathEscape(streamStation.Folder)
 
 	return encodeBlurl(&BLURL{
 		Playlists: []Playlist{
@@ -136,8 +136,8 @@ func (server *FNRadioServer) cleanupBrokenStations() {
 	}
 }
 
-func (server *FNRadioServer) cleanupLiveStations() {
-	for _, station := range server.LiveStations.Stations {
+func (server *FNRadioServer) cleanupStreamStations() {
+	for _, station := range server.StreamStations.Stations {
 		station.Quit <- struct{}{}
 	}
 
@@ -147,7 +147,7 @@ func (server *FNRadioServer) cleanupLiveStations() {
 	}
 
 	for _, file := range dir {
-		if strings.HasPrefix(file.Name(), "LIVE_") {
+		if strings.HasPrefix(file.Name(), "STR_") {
 			_ = os.RemoveAll("media/" + file.Name())
 		}
 	}

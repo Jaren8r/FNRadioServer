@@ -20,10 +20,10 @@ import (
 )
 
 type FNRadioServer struct {
-	Debug        bool
-	Router       *gin.Engine
-	DB           *pgx.Conn
-	LiveStations LiveStationStore
+	Debug          bool
+	Router         *gin.Engine
+	DB             *pgx.Conn
+	StreamStations StreamStationStore
 }
 
 func (server *FNRadioServer) getStation(c *gin.Context) {
@@ -251,7 +251,7 @@ func (server *FNRadioServer) createStation(c *gin.Context) { // nolint:funlen
 
 			return
 		}
-	case StationTypeLive:
+	case StationTypeStream:
 	// NOOP:
 	default:
 		c.JSON(400, gin.H{
@@ -296,11 +296,11 @@ func (server *FNRadioServer) deleteStation(c *gin.Context) {
 
 	_, _ = server.DB.Exec(context.TODO(), "DELETE FROM bindings WHERE station_user = $1 AND station_id = $2", user.ID, c.Param("station"))
 
-	if station.Type == StationTypeLive {
-		liveStation := server.LiveStations.Get(station)
-		if liveStation != nil {
-			liveStation.Quit <- struct{}{}
-			server.LiveStations.Remove(liveStation)
+	if station.Type == StationTypeStream {
+		streamStation := server.StreamStations.Get(station)
+		if streamStation != nil {
+			streamStation.Quit <- struct{}{}
+			server.StreamStations.Remove(streamStation)
 		}
 	}
 
@@ -332,9 +332,9 @@ func (server *FNRadioServer) addToQueue(c *gin.Context) {
 		return
 	}
 
-	if station.Type != StationTypeLive {
+	if station.Type != StationTypeStream {
 		c.JSON(400, gin.H{
-			"error": "station type must be live",
+			"error": "station type must be " + StationTypeStream,
 		})
 
 		return
@@ -349,9 +349,9 @@ func (server *FNRadioServer) addToQueue(c *gin.Context) {
 		return
 	}
 
-	liveStation := server.LiveStations.GetOrCreate(station)
+	streamStation := server.StreamStations.GetOrCreate(station)
 
-	liveStation.Queue.Add(&LiveStreamQueueElement{
+	streamStation.Queue.Add(&StreamQueueElement{
 		source: folder,
 		data:   make([]byte, 0),
 		mu:     sync.Mutex{},
@@ -427,14 +427,14 @@ func (server *FNRadioServer) deleteBinding(c *gin.Context) {
 	c.Status(204)
 }
 
-var liveRegex = regexp.MustCompile(`^/media/(LIVE_[0-9a-f]{32})/`)
+var streamRegex = regexp.MustCompile(`^/media/(STR_[0-9a-f]{32})/`)
 
 func (server *FNRadioServer) handleMedia(c *gin.Context) {
-	match := liveRegex.FindStringSubmatch(c.Request.URL.Path)
+	match := streamRegex.FindStringSubmatch(c.Request.URL.Path)
 	if len(match) > 0 {
-		liveStation := server.LiveStations.GetByFolder(match[1])
-		if liveStation != nil {
-			liveStation.LastRequest = time.Now()
+		streamStation := server.StreamStations.GetByFolder(match[1])
+		if streamStation != nil {
+			streamStation.LastRequest = time.Now()
 		}
 	}
 }
@@ -481,7 +481,7 @@ func (server *FNRadioServer) setupRouter() {
 }
 
 func (server *FNRadioServer) Destroy() {
-	server.cleanupLiveStations()
+	server.cleanupStreamStations()
 }
 
 func main() {
@@ -497,7 +497,7 @@ func main() {
 
 	server.cleanupBrokenStations()
 
-	server.cleanupLiveStations()
+	server.cleanupStreamStations()
 
 	server.setupRouter()
 

@@ -9,22 +9,22 @@ import (
 	"time"
 )
 
-type LiveStation struct {
-	store       *LiveStationStore
+type StreamStation struct {
+	store       *StreamStationStore
 	UserID      string
 	ID          string
 	Folder      string
 	LastRequest time.Time
 	Quit        chan struct{}
-	Queue       LiveStreamQueue
+	Queue       StreamQueue
 }
 
-type LiveStationStore struct {
-	Stations []*LiveStation
+type StreamStationStore struct {
+	Stations []*StreamStation
 	mu       sync.Mutex
 }
 
-func (store *LiveStationStore) Get(station *Station) *LiveStation {
+func (store *StreamStationStore) Get(station *Station) *StreamStation {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -38,7 +38,7 @@ func (store *LiveStationStore) Get(station *Station) *LiveStation {
 	return nil
 }
 
-func (store *LiveStationStore) GetOrCreate(station *Station) *LiveStation {
+func (store *StreamStationStore) GetOrCreate(station *Station) *StreamStation {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -49,24 +49,24 @@ func (store *LiveStationStore) GetOrCreate(station *Station) *LiveStation {
 		}
 	}
 
-	liveStation := &LiveStation{
+	streamStation := &StreamStation{
 		store:       store,
 		UserID:      station.UserID,
 		ID:          station.ID,
-		Folder:      "LIVE_" + generateID(),
+		Folder:      "STR_" + generateID(),
 		LastRequest: time.Now(),
 		Quit:        make(chan struct{}),
-		Queue:       LiveStreamQueue{},
+		Queue:       StreamQueue{},
 	}
 
-	store.Stations = append(store.Stations, liveStation)
+	store.Stations = append(store.Stations, streamStation)
 
-	liveStation.Start()
+	streamStation.Start()
 
-	return liveStation
+	return streamStation
 }
 
-func (store *LiveStationStore) GetByFolder(folder string) *LiveStation {
+func (store *StreamStationStore) GetByFolder(folder string) *StreamStation {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -79,7 +79,7 @@ func (store *LiveStationStore) GetByFolder(folder string) *LiveStation {
 	return nil
 }
 
-func (store *LiveStationStore) Add(station *LiveStation) {
+func (store *StreamStationStore) Add(station *StreamStation) {
 	store.mu.Lock()
 
 	store.Stations = append(store.Stations, station)
@@ -87,7 +87,7 @@ func (store *LiveStationStore) Add(station *LiveStation) {
 	store.mu.Unlock()
 }
 
-func (store *LiveStationStore) Remove(station *LiveStation) {
+func (store *StreamStationStore) Remove(station *StreamStation) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -105,7 +105,7 @@ const TickLengthInSeconds = 2
 const BytesPerSecond = 44100 /* sample rate */ * 2 /* 16-bit */ * 2 /* channels (stereo) */
 const BytesPerTick = BytesPerSecond * TickLengthInSeconds
 
-func (station *LiveStation) RunTicker(ffmpeg *exec.Cmd, stdin io.WriteCloser) {
+func (station *StreamStation) RunTicker(ffmpeg *exec.Cmd, stdin io.WriteCloser) {
 	ticker := time.NewTicker(TickLengthInSeconds * time.Second)
 	station.Quit = make(chan struct{}, 1)
 
@@ -137,7 +137,7 @@ func (station *LiveStation) RunTicker(ffmpeg *exec.Cmd, stdin io.WriteCloser) {
 	}
 }
 
-func (station *LiveStation) Start() {
+func (station *StreamStation) Start() {
 	err := os.Mkdir("media/"+station.Folder, 0777)
 	if err != nil {
 		fmt.Println(err)

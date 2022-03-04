@@ -9,12 +9,12 @@ import (
 	"time"
 )
 
-type LiveStreamQueue struct {
-	elements []*LiveStreamQueueElement
+type StreamQueue struct {
+	elements []*StreamQueueElement
 	mu       sync.Mutex
 }
 
-func (queue *LiveStreamQueue) Add(el *LiveStreamQueueElement) {
+func (queue *StreamQueue) Add(el *StreamQueueElement) {
 	queue.mu.Lock()
 
 	queue.elements = append(queue.elements, el)
@@ -22,14 +22,14 @@ func (queue *LiveStreamQueue) Add(el *LiveStreamQueueElement) {
 	defer queue.mu.Unlock()
 }
 
-func (queue *LiveStreamQueue) shift() {
+func (queue *StreamQueue) shift() {
 	if len(queue.elements) > 0 {
 		queue.elements[0] = nil
 		queue.elements = queue.elements[1:]
 	}
 }
 
-func (queue *LiveStreamQueue) GetAudioFrame() ([]byte, bool) {
+func (queue *StreamQueue) GetAudioFrame() ([]byte, bool) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 
@@ -62,7 +62,7 @@ func (queue *LiveStreamQueue) GetAudioFrame() ([]byte, bool) {
 	return frame, true
 }
 
-type LiveStreamQueueElement struct {
+type StreamQueueElement struct {
 	source  string
 	data    []byte
 	started bool
@@ -70,7 +70,7 @@ type LiveStreamQueueElement struct {
 	mu      sync.Mutex
 }
 
-func (e *LiveStreamQueueElement) Start() {
+func (e *StreamQueueElement) Start() {
 	e.started = true
 	master := "media/" + e.source + "/master.m3u8"
 
@@ -126,7 +126,7 @@ func (e *LiveStreamQueueElement) Start() {
 	}
 }
 
-func (e *LiveStreamQueueElement) Read(b []byte) (n int, err error) {
+func (e *StreamQueueElement) Read(b []byte) (n int, err error) {
 	e.mu.Lock()
 
 	n = copy(b, e.data)
@@ -142,7 +142,7 @@ func (e *LiveStreamQueueElement) Read(b []byte) (n int, err error) {
 	return
 }
 
-func (e *LiveStreamQueueElement) IsNearEnd() bool {
+func (e *StreamQueueElement) IsNearEnd() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
