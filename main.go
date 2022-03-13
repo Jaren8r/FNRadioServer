@@ -28,6 +28,18 @@ type FNRadioServer struct {
 }
 
 func (server *FNRadioServer) getStation(c *gin.Context) {
+	authenticatedUser := c.MustGet("user").(User)
+	if c.Param("user") != authenticatedUser.ID {
+		party := server.Parties.GetUserParty(authenticatedUser.ID)
+		if !(party != nil && party.Members[0] == c.Param("user")) {
+			c.JSON(403, gin.H{
+				"error": "you do not have permission to get this station",
+			})
+
+			return
+		}
+	}
+
 	station := Station{}
 
 	err := server.DB.QueryRow(context.TODO(), "SELECT type, source FROM stations WHERE user_id = $1 AND id = $2", c.Param("user"), c.Param("station")).Scan(&station.Type, &station.Source)
