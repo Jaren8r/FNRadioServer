@@ -329,7 +329,8 @@ OUTER:
 }
 
 func (server *FNRadioServer) getPlaylistStream(sources []string) (string, error) {
-	folder := "PL_" + hex.EncodeToString(sha256.New().Sum([]byte(strings.Join(sources, ","))))[:32]
+	hash := sha256.Sum256([]byte(strings.Join(sources, "\n")))
+	folder := "PL_" + hex.EncodeToString(hash[:16])
 
 	if _, err := os.Stat("media/" + folder); os.IsNotExist(err) {
 		err = os.Mkdir("media/"+folder, 0755)
