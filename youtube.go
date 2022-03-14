@@ -51,6 +51,17 @@ func extractYouTubeID(input string) (string, error) {
 	return "", errors.New("invalid url")
 }
 
+func extractYouTubePlaylistID(input string) (string, error) {
+	parsed, err := url.Parse(input)
+	if err == nil {
+		if parsed.Host == "www.youtube.com" && parsed.Path == "/playlist" && parsed.Query().Has("list") {
+			return parsed.Query().Get("list"), nil
+		}
+	}
+
+	return "", errors.New("invalid url")
+}
+
 func startYouTubeDownload(id string) error {
 	client := youtube.Client{}
 

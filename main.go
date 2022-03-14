@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kkdai/youtube/v2"
+
 	"github.com/jackc/pgx/v4/pgxpool"
 
 	"github.com/joho/godotenv"
@@ -221,27 +223,71 @@ type bindStationPayload struct {
 	StationID   string `json:"station_id"`
 }
 
-func (server *FNRadioServer) handleYouTubeSource(id string) (string, error) {
+func (server *FNRadioServer) handleYouTubeSource(id string) ([]string, error) {
 	folder := "YT_" + id
 
-	if _, err := os.Stat(folder); os.IsNotExist(err) {
+	if _, err := os.Stat("media/" + folder); os.IsNotExist(err) {
 		err := startYouTubeDownload(id)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 
-	return folder, nil
+	return []string{folder}, nil
 }
 
-func (server *FNRadioServer) handleSource(source string) (string, error) {
+func (server *FNRadioServer) handleYouTubePlaylist(id string) ([]string, error) {
+	client := youtube.Client{}
+
+	playlist, err := client.GetPlaylist("https://www.youtube.com/playlist?list=" + id)
+	if err != nil {
+		return nil, err
+	}
+
+	var sources []string
+
+	for _, video := range playlist.Videos {
+		source, err := server.handleYouTubeSource(video.ID)
+		if err == nil {
+			sources = append(sources, source...)
+		}
+	}
+
+	if sources == nil {
+		return nil, errors.New("no playlist items found")
+	}
+
+	return sources, nil
+}
+
+func (server *FNRadioServer) getSourceStreams(source string) ([]string, error) {
 	ytID, _ := extractYouTubeID(source)
 
 	if ytID != "" {
 		return server.handleYouTubeSource(ytID)
 	}
 
-	return "", errors.New("invalid source")
+	ytPlaylist, _ := extractYouTubePlaylistID(source)
+	if ytPlaylist != "" {
+		return server.handleYouTubePlaylist(ytPlaylist)
+	}
+
+	return nil, errors.New("invalid source")
+}
+
+func (server *FNRadioServer) getSourceStream(source string) (string, error) {
+	folders, err := server.getSourceStreams(source)
+	if err != nil {
+		return "", err
+	}
+
+	if len(folders) == 0 {
+		return "", errors.New("no sources found")
+	} else if len(folders) == 1 {
+		return folders[0], nil
+	} else {
+		return "", errors.New("playlists aren't supported here yet")
+	}
 }
 
 func (server *FNRadioServer) createStation(c *gin.Context) { // nolint:funlen
@@ -259,7 +305,7 @@ func (server *FNRadioServer) createStation(c *gin.Context) { // nolint:funlen
 
 	if existing != nil {
 		if payload.Type == StationTypeStatic && existing.Type == StationTypeStatic {
-			folder, err := server.handleSource(payload.Source)
+			stream, err := server.getSourceStream(payload.Source)
 			if err != nil {
 				c.JSON(400, gin.H{
 					"error": err.Error(),
@@ -268,7 +314,7 @@ func (server *FNRadioServer) createStation(c *gin.Context) { // nolint:funlen
 				return
 			}
 
-			_, err = server.DB.Exec(context.TODO(), "UPDATE stations SET source = $1 WHERE user_id = $2 AND id = $3", folder, user.ID, c.Param("station"))
+			_, err = server.DB.Exec(context.TODO(), "UPDATE stations SET source = $1 WHERE user_id = $2 AND id = $3", stream, user.ID, c.Param("station"))
 			if err != nil {
 				c.JSON(500, gin.H{
 					"error": err.Error(),
@@ -293,7 +339,7 @@ func (server *FNRadioServer) createStation(c *gin.Context) { // nolint:funlen
 
 	switch payload.Type {
 	case StationTypeStatic:
-		source, err = server.handleSource(payload.Source)
+		source, err = server.getSourceStream(payload.Source)
 		if err != nil {
 			c.JSON(400, gin.H{
 				"error": err.Error(),
@@ -390,7 +436,7 @@ func (server *FNRadioServer) addToQueue(c *gin.Context) {
 		return
 	}
 
-	folder, err := server.handleSource(payload.Source)
+	sources, err := server.getSourceStreams(payload.Source)
 	if err != nil {
 		c.JSON(400, gin.H{
 			"error": err.Error(),
@@ -401,11 +447,13 @@ func (server *FNRadioServer) addToQueue(c *gin.Context) {
 
 	streamStation := server.StreamStations.GetOrCreate(station)
 
-	streamStation.Queue.Add(&StreamQueueElement{
-		source: folder,
-		data:   make([]byte, 0),
-		mu:     sync.Mutex{},
-	})
+	for _, source := range sources {
+		streamStation.Queue.Add(&StreamQueueElement{
+			source: source,
+			data:   make([]byte, 0),
+			mu:     sync.Mutex{},
+		})
+	}
 
 	c.Status(204)
 }
