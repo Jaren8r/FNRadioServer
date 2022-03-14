@@ -2,17 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/kkdai/youtube/v2"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 
@@ -227,37 +228,13 @@ func (server *FNRadioServer) handleYouTubeSource(id string) ([]string, error) {
 	folder := "YT_" + id
 
 	if _, err := os.Stat("media/" + folder); os.IsNotExist(err) {
-		err := startYouTubeDownload(id)
+		err := server.startYouTubeDownload(id)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return []string{folder}, nil
-}
-
-func (server *FNRadioServer) handleYouTubePlaylist(id string) ([]string, error) {
-	client := youtube.Client{}
-
-	playlist, err := client.GetPlaylist("https://www.youtube.com/playlist?list=" + id)
-	if err != nil {
-		return nil, err
-	}
-
-	var sources []string
-
-	for _, video := range playlist.Videos {
-		source, err := server.handleYouTubeSource(video.ID)
-		if err == nil {
-			sources = append(sources, source...)
-		}
-	}
-
-	if sources == nil {
-		return nil, errors.New("no playlist items found")
-	}
-
-	return sources, nil
 }
 
 func (server *FNRadioServer) getSourceStreams(source string) ([]string, error) {
@@ -281,13 +258,89 @@ func (server *FNRadioServer) getSourceStream(source string) (string, error) {
 		return "", err
 	}
 
-	if len(folders) == 0 {
+	switch len(folders) {
+	case 0:
 		return "", errors.New("no sources found")
-	} else if len(folders) == 1 {
+	case 1:
 		return folders[0], nil
-	} else {
-		return "", errors.New("playlists aren't supported here yet")
+	default:
+		return server.getPlaylistStream(folders)
 	}
+}
+
+func (server *FNRadioServer) nukeSource(folder string) {
+	_ = os.RemoveAll("media/" + folder)
+
+	rows, err := server.DB.Query(context.Background(), "SELECT user_id, id FROM stations WHERE source = $1", folder)
+	if err != nil {
+		return
+	}
+
+	for rows.Next() {
+		var stationUser, stationID string
+
+		err := rows.Scan(&stationUser, &stationID)
+		if err != nil {
+			continue
+		}
+
+		_, _ = server.DB.Exec(context.Background(), "DELETE FROM bindings WHERE station_user = $1 AND station_id = $2", stationUser, stationID)
+	}
+
+	_, _ = server.DB.Exec(context.Background(), "SELECT FROM stations WHERE source = $1", folder)
+}
+
+func (server *FNRadioServer) createPlaylistStream(folder string, sources []string) {
+OUTER:
+	for {
+		for _, source := range sources {
+			if _, err := os.Stat("media/" + source); os.IsNotExist(err) {
+				server.nukeSource(folder)
+				return
+			}
+
+			if _, err := os.Stat("media/" + source + "/master.m3u8"); os.IsNotExist(err) {
+				time.Sleep(time.Second)
+				continue OUTER
+			}
+		}
+
+		break
+	}
+
+	playlistEntries := make([]string, 0)
+	for _, source := range sources {
+		playlistEntries = append(playlistEntries, "file '../"+source+"/master.m3u8'")
+	}
+
+	err := os.WriteFile("media/"+folder+"/playlist.txt", []byte(strings.Join(playlistEntries, "\n")), 0644)
+	if err != nil {
+		server.nukeSource(folder)
+		return
+	}
+
+	command := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", "media/"+folder+"/playlist.txt", "-hls_playlist_type", "vod", "-hls_time", "2", "-hls_segment_type", "fmp4", "-hls_flags", "discont_start", "-c:a", "copy", "-master_pl_name", "master.m3u8", "media/"+folder+"/output.m3u8")
+
+	err = command.Run()
+	if err != nil {
+		server.nukeSource(folder)
+		return
+	}
+}
+
+func (server *FNRadioServer) getPlaylistStream(sources []string) (string, error) {
+	folder := "PL_" + hex.EncodeToString(sha256.New().Sum([]byte(strings.Join(sources, ","))))[:32]
+
+	if _, err := os.Stat("media/" + folder); os.IsNotExist(err) {
+		err = os.Mkdir("media/"+folder, 0755)
+		if err != nil {
+			return "", err
+		}
+
+		go server.createPlaylistStream(folder, sources)
+	}
+
+	return folder, nil
 }
 
 func (server *FNRadioServer) createStation(c *gin.Context) { // nolint:funlen

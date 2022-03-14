@@ -62,7 +62,7 @@ func extractYouTubePlaylistID(input string) (string, error) {
 	return "", errors.New("invalid url")
 }
 
-func startYouTubeDownload(id string) error {
+func (server *FNRadioServer) startYouTubeDownload(id string) error {
 	client := youtube.Client{}
 
 	video, err := client.GetVideo(id)
@@ -83,12 +83,12 @@ func startYouTubeDownload(id string) error {
 		return err
 	}
 
-	go downloadYouTubeVideo(id, stream)
+	go server.downloadYouTubeVideo(id, stream)
 
 	return nil
 }
 
-func downloadYouTubeVideo(id string, stream io.ReadCloser) {
+func (server *FNRadioServer) downloadYouTubeVideo(id string, stream io.ReadCloser) {
 	dir := "media/YT_" + id
 
 	command := exec.Command("ffmpeg", "-i", "-", "-vn", "-hls_playlist_type", "vod", "-hls_time", "2", "-hls_segment_type", "fmp4", "-hls_flags", "discont_start", "-c:a", "libfdk_aac", "-b:a", "192k", "-master_pl_name", "master.m3u8", dir+"/output.m3u8")
@@ -112,7 +112,31 @@ func downloadYouTubeVideo(id string, stream io.ReadCloser) {
 	err = command.Run()
 
 	if err != nil {
-		_ = os.Remove("media/YT_" + id)
+		server.nukeSource("YT_" + id)
 		return
 	}
+}
+
+func (server *FNRadioServer) handleYouTubePlaylist(id string) ([]string, error) {
+	client := youtube.Client{}
+
+	playlist, err := client.GetPlaylist("https://www.youtube.com/playlist?list=" + id)
+	if err != nil {
+		return nil, err
+	}
+
+	var sources []string
+
+	for _, video := range playlist.Videos {
+		source, err := server.handleYouTubeSource(video.ID)
+		if err == nil {
+			sources = append(sources, source...)
+		}
+	}
+
+	if sources == nil {
+		return nil, errors.New("no playlist items found")
+	}
+
+	return sources, nil
 }

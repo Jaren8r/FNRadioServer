@@ -131,7 +131,7 @@ func (server *FNRadioServer) cleanupBrokenStations() {
 
 	for _, file := range dir {
 		if _, err := os.Stat("media/" + file.Name() + "/master.m3u8"); os.IsNotExist(err) {
-			_ = os.RemoveAll("media/" + file.Name())
+			server.nukeSource(file.Name())
 		}
 	}
 }
