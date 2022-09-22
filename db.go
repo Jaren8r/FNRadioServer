@@ -54,6 +54,8 @@ func (server *FNRadioServer) getUserStations(user string) ([]Station, error) {
 		return nil, err
 	}
 
+	defer rows.Close()
+
 	for rows.Next() {
 		var station Station
 
@@ -79,6 +81,8 @@ func (server *FNRadioServer) getUserBindings(user string) ([]Binding, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	defer rows.Close()
 
 	for rows.Next() {
 		var binding Binding

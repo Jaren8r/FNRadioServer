@@ -276,6 +276,8 @@ func (server *FNRadioServer) nukeSource(folder string) {
 		return
 	}
 
+	defer rows.Close()
+
 	for rows.Next() {
 		var stationUser, stationID string
 
